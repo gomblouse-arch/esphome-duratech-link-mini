@@ -1,0 +1,258 @@
+substitutions:
+  device_name: zwembad-rs485
+  friendly_name: Zwembad RS485
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: Duratech Link Mini RS485 ASCII (9600 8N1) via MAX485
+  on_boot:
+    priority: -100
+    then:
+      # MAX485 DE+RE high = permanent send mode (master, no RX)
+      - output.turn_on: rs485_de
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Optional fixed IP — uncomment and set your LAN values:
+  # manual_ip:
+  #   static_ip: 192.168.1.146
+  #   gateway: 192.168.1.1
+  #   subnet: 255.255.255.0
+  #   dns1: 192.168.1.1
+  ap:
+    ssid: "${device_name}-setup"
+    password: !secret ap_password
+
+captive_portal:
+
+globals:
+  - id: rs485_tx_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: rs485_use_crlf
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+# MAX485: DE + RE tied together on GPIO4 (HIGH = transmit)
+output:
+  - platform: gpio
+    pin: GPIO4
+    id: rs485_de
+    inverted: false
+
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+script:
+  - id: rs485_send
+    parameters:
+      command: string
+    mode: single
+    then:
+      - lambda: |-
+          id(uart_bus).write_str(command.c_str());
+          if (id(rs485_use_crlf)) {
+            id(uart_bus).write_str("\r\n");
+          }
+          id(uart_bus).flush();
+      - lambda: 'id(rs485_tx_count) = id(rs485_tx_count) + 1;'
+      - logger.log:
+          format: "RS485 sent: %s%s (#%d)"
+          args:
+            - command.c_str()
+            - 'id(rs485_use_crlf) ? "\\r\\n" : ""'
+            - id(rs485_tx_count)
+
+  - id: lamps_on
+    then:
+      - script.execute:
+          id: rs485_send
+          command: "PL1"
+
+  - id: lamps_off
+    then:
+      - script.execute:
+          id: rs485_send
+          command: "PL0"
+
+  - id: program_up
+    then:
+      - script.execute:
+          id: rs485_send
+          command: "PsU"
+
+  - id: program_down
+    then:
+      - script.execute:
+          id: rs485_send
+          command: "PsD"
+
+  - id: set_program
+    parameters:
+      program: int
+    then:
+      - script.execute: lamps_on
+      - delay: 300ms
+      - lambda: |-
+          char buf[8];
+          snprintf(buf, sizeof(buf), "PS%02d", program);
+          id(rs485_send).execute(buf);
+
+switch:
+  - platform: template
+    name: "Zwembad RS485 CR/LF suffix"
+    id: sw_crlf
+    icon: mdi:keyboard-return
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(rs485_use_crlf) = true;'
+    turn_off_action:
+      - lambda: 'id(rs485_use_crlf) = false;'
+
+button:
+  - platform: template
+    name: "Zwembad lampen aan"
+    id: btn_on
+    icon: mdi:lightbulb
+    on_press:
+      - script.execute: lamps_on
+
+  - platform: template
+    name: "Zwembad lampen uit"
+    id: btn_off
+    icon: mdi:lightbulb-off
+    on_press:
+      - script.execute: lamps_off
+
+  - platform: template
+    name: "Zwembad volgend programma"
+    id: btn_next
+    icon: mdi:skip-next
+    on_press:
+      - script.execute: program_up
+
+  - platform: template
+    name: "Zwembad vorig programma"
+    id: btn_prev
+    icon: mdi:skip-previous
+    on_press:
+      - script.execute: program_down
+
+  - platform: template
+    name: "Zwembad test PL1"
+    id: btn_test_pl1
+    icon: mdi:test-tube
+    on_press:
+      - script.execute:
+          id: rs485_send
+          command: "PL1"
+
+  - platform: template
+    name: "Zwembad test PsU"
+    id: btn_test_psu
+    icon: mdi:test-tube
+    on_press:
+      - script.execute:
+          id: rs485_send
+          command: "PsU"
+
+select:
+  - platform: template
+    name: "Zwembad verlichting preset"
+    id: preset_select
+    icon: mdi:palette
+    optimistic: true
+    options:
+      - "Uit"
+      - "Wit koud"
+      - "Wit warm"
+      - "Wit neutraal"
+      - "Blauw"
+      - "Groen"
+      - "Rood"
+      - "Paars"
+      - "Geel"
+      - "Party"
+    initial_option: "Uit"
+    set_action:
+      - lambda: |-
+          const std::string &p = x;
+          if (p == "Uit") {
+            id(lamps_off).execute();
+          } else if (p == "Wit koud") {
+            id(set_program).execute(4);
+          } else if (p == "Wit warm") {
+            id(set_program).execute(2);
+          } else if (p == "Wit neutraal") {
+            id(set_program).execute(3);
+          } else if (p == "Blauw") {
+            id(set_program).execute(6);
+          } else if (p == "Groen") {
+            id(set_program).execute(7);
+          } else if (p == "Rood") {
+            id(set_program).execute(8);
+          } else if (p == "Paars") {
+            id(set_program).execute(9);
+          } else if (p == "Geel") {
+            id(set_program).execute(10);
+          } else if (p == "Party") {
+            id(set_program).execute(11);
+          }
+
+sensor:
+  - platform: template
+    name: "Zwembad RS485 verzonden"
+    id: tx_counter
+    icon: mdi:counter
+    lambda: 'return id(rs485_tx_count);'
+    update_interval: 1s
+
+number:
+  - platform: template
+    name: "Zwembad helderheid"
+    id: brightness_pct
+    icon: mdi:brightness-6
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 100
+    set_action:
+      - lambda: |-
+          char buf[8];
+          snprintf(buf, sizeof(buf), "PD%03d", (int) x);
+          id(rs485_send).execute(buf);
+
+text_sensor:
+  - platform: template
+    name: "Zwembad RS485 info"
+    id: info
+    lambda: |-
+      return {"9600 8N1 | PL0/PL1/PsU | DuraCloud=Commandos | DE always HIGH"};
+    update_interval: never

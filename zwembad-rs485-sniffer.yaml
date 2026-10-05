@@ -1,0 +1,242 @@
+substitutions:
+  device_name: zwembad-rs485
+  friendly_name: Zwembad RS485
+
+# RS485 SNIFFER — listen before we talk
+# MAX485 DE+RE → GPIO4 LOW = receive mode (required for sniffing)
+# MAX485 RO → GPIO16, DI → GPIO17
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: Link Mini RS485 sniffer (9600 default, multi-baud)
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_off: rs485_de
+      - lambda: 'id(uart_bus).set_baud_rate(id(current_baud));'
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+  logs:
+    sniffer: DEBUG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Optional fixed IP — uncomment and set your LAN values:
+  # manual_ip:
+  #   static_ip: 192.168.1.146
+  #   gateway: 192.168.1.1
+  #   subnet: 255.255.255.0
+  #   dns1: 192.168.1.1
+  ap:
+    ssid: "${device_name}-setup"
+    password: !secret ap_password
+
+captive_portal:
+
+globals:
+  - id: current_baud
+    type: int
+    restore_value: yes
+    initial_value: '9600'
+  - id: rx_total_bytes
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: rx_packet_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: sniff_buffer
+    type: std::string
+    restore_value: no
+  - id: last_hex
+    type: std::string
+    restore_value: no
+  - id: last_ascii
+    type: std::string
+    restore_value: no
+  - id: session_log
+    type: std::string
+    restore_value: no
+  - id: last_rx_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+output:
+  - platform: gpio
+    pin: GPIO4
+    id: rs485_de
+    inverted: false
+
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+interval:
+  - interval: 25ms
+    then:
+      - lambda: |-
+          uint8_t byte;
+          bool got = false;
+          auto flush_packet = [&]() {
+            if (id(sniff_buffer).empty()) return;
+            id(last_hex) = id(sniff_buffer);
+            id(rx_packet_count) += 1;
+            ESP_LOGI("sniffer", "RX[%d] #%d: %s", id(current_baud), id(rx_packet_count), id(sniff_buffer).c_str());
+            std::string entry = "|" + id(sniff_buffer);
+            id(session_log) += entry;
+            if (id(session_log).size() > 300) {
+              id(session_log) = id(session_log).substr(id(session_log).size() - 300);
+            }
+            id(sniff_buffer).clear();
+            id(last_rx_ms) = 0;
+          };
+          std::string asc_buf;
+          while (id(uart_bus).available()) {
+            if (!id(uart_bus).read_byte(&byte)) break;
+            got = true;
+            id(rx_total_bytes) += 1;
+            id(last_rx_ms) = millis();
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%02X ", byte);
+            id(sniff_buffer) += hex;
+            if (byte >= 32 && byte <= 126) {
+              asc_buf += static_cast<char>(byte);
+            } else if (byte == '\r') {
+              asc_buf += "\\r";
+            } else if (byte == '\n') {
+              asc_buf += "\\n";
+            }
+            if (byte == '\n' || byte == '\r' || id(sniff_buffer).size() > 240) {
+              id(last_ascii) = asc_buf;
+              flush_packet();
+              asc_buf.clear();
+            }
+          }
+          if (!got && !id(sniff_buffer).empty() && id(last_rx_ms) > 0 &&
+              (millis() - id(last_rx_ms) > 150)) {
+            id(last_ascii) = asc_buf.empty() ? id(last_ascii) : asc_buf;
+            flush_packet();
+          }
+
+select:
+  - platform: template
+    name: "RS485 sniff baudrate"
+    id: baud_select
+    icon: mdi:speedometer
+    optimistic: true
+    options:
+      - "9600"
+      - "19200"
+      - "38400"
+      - "57600"
+      - "115200"
+      - "250000"
+    initial_option: "9600"
+    set_action:
+      - lambda: |-
+          id(current_baud) = atoi(x.c_str());
+          id(uart_bus).set_baud_rate(id(current_baud));
+          id(sniff_buffer).clear();
+          ESP_LOGI("sniffer", "Baudrate -> %d", id(current_baud));
+
+button:
+  - platform: template
+    name: "RS485 sniff buffer wissen"
+    id: btn_clear
+    icon: mdi:delete
+    on_press:
+      - lambda: |-
+          id(sniff_buffer).clear();
+          id(last_hex).clear();
+          id(last_ascii).clear();
+          id(session_log).clear();
+          id(rx_total_bytes) = 0;
+          id(rx_packet_count) = 0;
+          id(last_rx_ms) = 0;
+          ESP_LOGI("sniffer", "Counters reset");
+
+  - platform: template
+    name: "RS485 test zend PL1"
+    id: btn_tx_pl1
+    icon: mdi:upload
+    on_press:
+      - script.execute: tx_pl1
+
+script:
+  - id: tx_pl1
+    then:
+      - output.turn_on: rs485_de
+      - delay: 5ms
+      - lambda: 'id(uart_bus).write_str("PL1");'
+      - delay: 50ms
+      - output.turn_off: rs485_de
+      - logger.log: "TX test: PL1 (DE was HIGH 50ms)"
+
+sensor:
+  - platform: template
+    name: "RS485 bytes ontvangen"
+    id: rx_bytes_sensor
+    icon: mdi:download
+    lambda: 'return id(rx_total_bytes);'
+    update_interval: 1s
+
+  - platform: template
+    name: "RS485 packets ontvangen"
+    id: rx_packets_sensor
+    icon: mdi:package-variant
+    lambda: 'return id(rx_packet_count);'
+    update_interval: 1s
+
+text_sensor:
+  - platform: template
+    name: "RS485 laatste packet"
+    id: last_packet
+    icon: mdi:eye
+    lambda: 'return id(last_hex);'
+    update_interval: 500ms
+
+  - platform: template
+    name: "RS485 laatste packet ASCII"
+    id: last_packet_ascii
+    icon: mdi:format-text
+    lambda: 'return id(last_ascii);'
+    update_interval: 500ms
+
+  - platform: template
+    name: "RS485 sessie log"
+    id: session_log_sensor
+    icon: mdi:text-box-multiple
+    lambda: 'return id(session_log);'
+    update_interval: 500ms
+
+  - platform: template
+    name: "RS485 sniffer status"
+    id: sniffer_info
+    lambda: |-
+      char buf[80];
+      snprintf(buf, sizeof(buf), "SNIFF @ %d baud | DE=LOW=listen | RO=GPIO16", id(current_baud));
+      return {buf};
+    update_interval: 5s

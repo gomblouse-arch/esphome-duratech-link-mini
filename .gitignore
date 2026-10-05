@@ -1,0 +1,39 @@
+# Secrets — never commit
+.secrets/
+secrets.yaml
+**/secrets.yaml
+
+# Local backups (may contain IPs, MACs, HA dashboards, names)
+backup/
+
+# ESPHome build artifacts
+.esphome/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# BLE captures (large binary; keep locally)
+captures/*.pcapng
+captures/*.pcap
+captures/*.btsnoop
+
+# One-off HA dashboard transform helpers (local agent tooling)
+tools/gen_*.py
+tools/inspect_*.py
+tools/find_garage.py
+tools/*transform*.txt
+tools/*_mcp*.json
+tools/mcp_*.json
+tools/gated_chips_*.txt
+tools/volg_cd_*.txt
+tools/dashboard_transform.txt
+tools/_*
