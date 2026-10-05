@@ -1,7 +1,10 @@
-﻿# Home Assistant Community â€” draft post
+﻿# Home Assistant Community — draft / status
 
-**Category:** Share your Projects! / ESPHome  
+**Category:** Share your Projects!  
 **Title:** Duratech Link Mini (Vision Spectra) BLE bridge for Home Assistant (ESPHome)
+
+**Status (2026-10-05):** Submitted under account `gomblouse-arch`. Discourse flagged the new account (“typed too fast”) and the topic is **pending moderator approval**. Check:
+https://community.home-assistant.io/u/gomblouse-arch/activity/pending
 
 ---
 
@@ -11,9 +14,9 @@ I reverse-engineered the DuraCloud MQTT-over-BLE protocol used by the **Duratech
 
 ### What it does
 - Lights on/off from HA
-- â€œNext programâ€ (Spectra advances via 12 V AC pulse â€” no direct colour GATT command)
-- Optional program number 1â€“11 by stepping
-- Remembers the last program after an intentional off â‰¥ 30 s
+- “Next program” (Spectra advances via 12 V AC pulse — no direct colour GATT command)
+- Optional program number 1–11 by stepping
+- Remembers the last program after an intentional off ≥ 30 s
 - Filters short BLE power glitches so the counter does not jump while lights are off
 
 ### Hardware
@@ -23,7 +26,6 @@ I reverse-engineered the DuraCloud MQTT-over-BLE protocol used by the **Duratech
 ### Repo
 https://github.com/gomblouse-arch/esphome-duratech-link-mini
 
-MIT licensed. Not affiliated with Duratech/Fluidra. Feedback and improvements welcome â€” especially if your Link Mini firmware behaves differently.
+MIT licensed. Not affiliated with Duratech/Fluidra. Feedback and improvements welcome — especially if your Link Mini firmware behaves differently.
 
 Happy to answer questions.
-
